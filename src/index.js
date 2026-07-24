@@ -1,15 +1,12 @@
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { randomUUID } from 'node:crypto';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import express from 'express';
 import cors from 'cors';
 import logger from './logger.js';
-import SseManager from './sseManager.js';
-import {
-  searchJobsPrompt,
-  jobRecommendationsPrompt,
-  resumeFeedbackPrompt,
-} from './prompts/index.js';
-import { searchJobsTool, searchJobsHandler } from './tools/index.js';
+import { createMcpServer } from './server.js';
+import { searchJobsHandler } from './tools/index.js';
 
 // Environment configuration
 const PORT = Number(process.env.JOBSPY_PORT || process.env.PORT || 9423);
@@ -18,25 +15,13 @@ const ENABLE_SSE = ['1', 'true', 'yes', 'on'].includes(
   (process.env.ENABLE_SSE || '').toLowerCase(),
 );
 
-// Create the MCP server
-const server = new McpServer({
-  name: 'JobSpy MCP Server',
-  version: '1.0.0',
-  description:
-    'A Model Context Protocol server that enables searching for jobs across various platforms',
-});
-
-const sseManager = new SseManager(server);
-
-searchJobsPrompt(server);
-jobRecommendationsPrompt(server);
-resumeFeedbackPrompt(server);
-searchJobsTool(server, sseManager);
+const { server, sseManager } = createMcpServer();
 
 // Initialize transports
 let stdioTransport = null;
 let httpServer = null;
 let shutdownStarted = false;
+const streamableSessions = new Map();
 
 // Start the server with configured transports
 async function runServer() {
@@ -46,7 +31,7 @@ async function runServer() {
     // Initialize and connect transports
     const connectedTransports = [];
 
-    // Set up SSE transport if enabled
+    // Set up HTTP transports if enabled
     if (ENABLE_SSE) {
       try {
         // Create Express app
@@ -62,6 +47,88 @@ async function runServer() {
         // Health check endpoint
         app.get('/health', (req, res) => {
           res.status(200).json({ status: 'ok' });
+        });
+
+        // Streamable HTTP endpoint used by Manufact and current MCP clients
+        app.all('/mcp', async (req, res) => {
+          const sessionIdHeader = req.headers['mcp-session-id'];
+          const sessionId = typeof sessionIdHeader === 'string'
+            ? sessionIdHeader
+            : undefined;
+          let session = sessionId
+            ? streamableSessions.get(sessionId)
+            : undefined;
+
+          try {
+            if (sessionId && !session) {
+              res.status(404).json({
+                jsonrpc: '2.0',
+                error: {
+                  code: -32001,
+                  message: 'Unknown MCP session',
+                },
+                id: null,
+              });
+              return;
+            }
+
+            if (!session) {
+              if (req.method !== 'POST' || !isInitializeRequest(req.body)) {
+                res.status(400).json({
+                  jsonrpc: '2.0',
+                  error: {
+                    code: -32000,
+                    message: 'An MCP initialization request is required',
+                  },
+                  id: null,
+                });
+                return;
+              }
+
+              const configuredServer = createMcpServer();
+              const transport = new StreamableHTTPServerTransport({
+                sessionIdGenerator: () => randomUUID(),
+                onsessioninitialized: (initializedSessionId) => {
+                  streamableSessions.set(initializedSessionId, session);
+                  logger.info(
+                    `Streamable HTTP session initialized: ${initializedSessionId}`,
+                  );
+                },
+              });
+              session = {
+                server: configuredServer.server,
+                transport,
+              };
+              transport.onclose = () => {
+                const closedSessionId = transport.sessionId;
+                if (closedSessionId) {
+                  streamableSessions.delete(closedSessionId);
+                  logger.info(
+                    `Streamable HTTP session closed: ${closedSessionId}`,
+                  );
+                }
+              };
+
+              await session.server.connect(transport);
+            }
+
+            await session.transport.handleRequest(req, res, req.body);
+          } catch (error) {
+            logger.error('Failed to handle Streamable HTTP request', {
+              error: error.message,
+              stack: error.stack,
+            });
+            if (!res.headersSent) {
+              res.status(500).json({
+                jsonrpc: '2.0',
+                error: {
+                  code: -32603,
+                  message: 'Internal server error',
+                },
+                id: null,
+              });
+            }
+          }
         });
 
         // SSE endpoint for client connections
@@ -95,17 +162,18 @@ async function runServer() {
 
         // Start the Express server
         httpServer = app.listen(PORT, HOST, () => {
-          logger.info(`SSE server listening at http://${HOST}:${PORT}`);
+          logger.info(`MCP HTTP server listening at http://${HOST}:${PORT}`);
         });
 
-        connectedTransports.push('SSE');
+        connectedTransports.push('HTTP');
 
+        logger.info(`MCP endpoint available at http://${HOST}:${PORT}/mcp`);
         logger.info(`SSE transport listening at http://${HOST}:${PORT}/sse`);
         logger.info(
           `Send endpoint available at http://${HOST}:${PORT}/messages`,
         );
       } catch (error) {
-        logger.error('Failed to connect SSE transport', {
+        logger.error('Failed to start HTTP transport', {
           error: error.message,
           stack: error.stack,
         });
@@ -154,6 +222,13 @@ async function shutdown() {
   logger.info('Shutting down JobSpy MCP server...');
 
   try {
+    await Promise.all(
+      Array.from(
+        streamableSessions.values(),
+        ({ transport }) => transport.close(),
+      ),
+    );
+    streamableSessions.clear();
     await server.close();
 
     if (httpServer) {

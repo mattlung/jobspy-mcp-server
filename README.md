@@ -49,7 +49,7 @@ You can configure the server using the following environment variables:
 | `JOBSPY_ACCESS_TOKEN`   | Access token for JobSpy API (if required)| none        |
 | `PORT`                  | Port for the MCP server                  | `9423`      |
 | `HOST`                  | Host for HTTP server                     | '0.0.0.0'   |
-| `ENABLE_SSE`            | Enable Server-Sent Events transport      | 0        |
+| `ENABLE_SSE`            | Enable HTTP transports                   | 0        |
 
 ## Setting Up Configuration
 
@@ -101,55 +101,15 @@ Add the following to your Claude Desktop config file (typically at `~/Library/Ap
 }
 ```
 
-### Using with Web Clients (SSE Transport)
+### Using with Remote MCP Clients
 
-The server exposes HTTP endpoints that allow web applications to interact with the JobSpy MCP server:
+Set `ENABLE_SSE=1` and connect remote MCP clients to:
 
-- **Connect for updates**: `GET /mcp/connect`
-  - Establishes a Server-Sent Events (SSE) connection for real-time updates
-  - Returns progress updates and job search results
-
-- **Send requests**: `POST /mcp/request`
-  - Accepts tool invocation requests in MCP format
-  - Returns tool responses
-
-Example JavaScript client for browser:
-
-```javascript
-// Connect to SSE endpoint
-const eventSource = new EventSource('http://localhost:9423/mcp/connect');
-
-// Listen for updates
-eventSource.onmessage = function(event) {
-  const data = JSON.parse(event.data);
-  console.log('Received update:', data);
-  
-  // Handle progress updates
-  if (data.type === 'progress') {
-    updateProgressBar(data.progress);
-  }
-};
-
-// Send a search request
-async function searchJobs() {
-  const response = await fetch('http://localhost:9423/mcp/request', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      tool: 'search_jobs',
-      params: {
-        search_term: 'software engineer',
-        location: 'San Francisco, CA',
-        site_names: 'indeed,linkedin'
-      }
-    })
-  });
-  
-  return await response.json();
-}
+```text
+http://localhost:9423/mcp
 ```
+
+The legacy HTTP+SSE endpoints remain available at `/sse` and `/messages`.
 
 ### API Usage
 

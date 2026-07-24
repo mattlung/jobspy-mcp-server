@@ -13,7 +13,7 @@
     "dev": "nodemon src/index.js",
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix",
-    "test": "node --test tests/prompts.test.js"
+    "test": "node --test tests/prompts.test.js tests/http.test.js"
   },
   "keywords": [
     "mcp",
