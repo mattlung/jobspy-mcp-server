@@ -3,7 +3,7 @@ import { z } from 'zod';
 /**
  * Job Recommendations Schema - Parameters for job recommendations
  */
-export const jobRecommendationsSchema = z.object({
+export const jobRecommendationsArgsSchema = {
   skills: z.string()
     .describe('A list of skills the job seeker possesses'),
   experienceLevel: z.string()
@@ -14,22 +14,29 @@ export const jobRecommendationsSchema = z.object({
     .describe('Areas of interest for the job seeker that can help guide job recommendations'),
   jobType: z.string()
     .describe('The type of job the seeker is looking for (e.g., full-time, part-time, contract, internship)'),
-});
+};
 
+export const jobRecommendationsSchema = z.object(
+  jobRecommendationsArgsSchema,
+);
 
 /**
  * Complete job recommendations prompt definition for MCP server
  */
-export const jobRecommendationsPrompt = (server) => server.prompt(
+export const jobRecommendationsPrompt = (server) => server.registerPrompt(
   'job_recommendations',
-  'Get personalized job recommendations based on skills and preferences',
-  jobRecommendationsSchema,
+  {
+    description: 'Get personalized job recommendations based on skills and preferences',
+    argsSchema: jobRecommendationsArgsSchema,
+  },
   (inputs) => {
     return {
       messages: [
         {
-          role: 'system',
-          content: `
+          role: 'user',
+          content: {
+            type: 'text',
+            text: `
 You are a career advisor specializing in helping job seekers find relevant job opportunities based on their skills and preferences.
 Given the information about a job seeker and a list of job postings, recommend the most suitable jobs for them.
 
@@ -37,11 +44,7 @@ For each recommended job, explain why it's a good match based on the person's sk
 Focus on highlighting the alignment between the job requirements and the candidate's profile.
 
 Keep in mind that the job recommendations should be practical and actionable, allowing the job seeker to apply for roles where they have a good chance of success.
-`,
-        },
-        {
-          role: 'user',
-          content: `
+
 Job Seeker Profile:
 - Skills: ${inputs.skills}
 - Experience Level: ${inputs.experienceLevel}
@@ -52,7 +55,8 @@ Job Seeker Profile:
 Please recommend relevant job opportunities from the list below, explaining why each job would be a good match:
 
 {{jobListings}}
-        `,
+            `,
+          },
         },
       ],
     };

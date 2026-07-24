@@ -12,9 +12,11 @@ import {
 import { searchJobsTool, searchJobsHandler } from './tools/index.js';
 
 // Environment configuration
-const PORT = process.env.JOBSPY_PORT || 9423;
-const HOST = process.env.JOBSPY_HOST || '0.0.0.0';
-const ENABLE_SSE = !!(process.env.ENABLE_SSE | 0);
+const PORT = Number(process.env.JOBSPY_PORT || process.env.PORT || 9423);
+const HOST = process.env.JOBSPY_HOST || process.env.HOST || '0.0.0.0';
+const ENABLE_SSE = ['1', 'true', 'yes', 'on'].includes(
+  (process.env.ENABLE_SSE || '').toLowerCase(),
+);
 
 // Create the MCP server
 const server = new McpServer({
@@ -34,6 +36,7 @@ searchJobsTool(server, sseManager);
 // Initialize transports
 let stdioTransport = null;
 let httpServer = null;
+let shutdownStarted = false;
 
 // Start the server with configured transports
 async function runServer() {
@@ -143,25 +146,34 @@ async function runServer() {
 
 // Handle graceful shutdown
 async function shutdown() {
+  if (shutdownStarted) {
+    return;
+  }
+  shutdownStarted = true;
+
   logger.info('Shutting down JobSpy MCP server...');
 
   try {
-    // Disconnect all transports gracefully
-    await server.disconnect();
+    await server.close();
 
-    // Close HTTP server if it exists
     if (httpServer) {
-      httpServer.close(() => {
-        logger.info('HTTP server closed');
+      await new Promise((resolve, reject) => {
+        httpServer.close((error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+          logger.info('HTTP server closed');
+          resolve();
+        });
       });
     }
 
     logger.info('Server shutdown complete');
+    process.exitCode = 0;
   } catch (error) {
     logger.error('Error during shutdown', { error: error.message });
-  } finally {
-    // Give logger time to flush
-    setTimeout(() => process.exit(0), 100);
+    process.exitCode = 1;
   }
 }
 

@@ -13,7 +13,7 @@
     "dev": "nodemon src/index.js",
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --test tests/prompts.test.js"
   },
   "keywords": [
     "mcp",
@@ -25,12 +25,12 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.10.1",
+    "@modelcontextprotocol/sdk": "1.29.0",
     "change-case-object": "^2.0.0",
     "cors": "^2.8.5",
     "express": "^4.22.1",
     "winston": "^3.10.0",
-    "zod": "^3.24.3"
+    "zod": "3.25.76"
   },
   "overrides": {
     "qs": ">=6.15.0"
